@@ -4,8 +4,8 @@ import random
 import math
 import numpy as np
 
-from .constants import *
-from .entities import Agent, Ball
+from soccer_simulation.game.constants import *
+from soccer_simulation.game.entities import Agent, Ball
 
 class Game:
     def __init__(self, config, headless=False):
