@@ -1,11 +1,16 @@
+import os
+import sys
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import argparse
 import threading
 import pygame
 import logging
 import json
 
-from api.server import run_server, init_environments
-from game.constants import *
+from soccer_simulation.api.server import run_server, init_environments, environments
+from soccer_simulation.game.constants import *
 
 def main():
     parser = argparse.ArgumentParser(description="Soccer Simulation")
@@ -41,16 +46,19 @@ def main():
     if not args.headless:
         game = environments[0]
         running = True
-        while running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-            
-            # In graphical mode, we only draw the current state.
-            # The simulation is advanced by API calls from a client (e.g., test_api.py).
-            game.draw()
-        
-        pygame.quit()
+        try:
+            while running:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        running = False
+                
+                # In graphical mode, we only draw the current state.
+                # The simulation is advanced by API calls from a client (e.g., test_api.py).
+                game.draw()
+        except KeyboardInterrupt:
+            print("\nCaught KeyboardInterrupt, shutting down.")
+        finally:
+            pygame.quit()
     else:
         # In headless mode, just keep the main thread alive
         server_thread.join()

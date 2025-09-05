@@ -71,6 +71,7 @@ def main():
 
                 # Update scores based on goal info
                 for i, info in enumerate(data["infos"]):
+                    # Safely check if a goal was scored before accessing the key
                     if "goal_scored_by" in info:
                         team = info["goal_scored_by"]
                         scores[i][team] += 1

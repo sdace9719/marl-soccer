@@ -3,3 +3,8 @@ pymunk
 numpy
 Flask
 requests
+ipykernel
+pettingzoo
+gymnasium
+supersuit
+stable-baselines3[extra]

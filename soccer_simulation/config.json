@@ -17,6 +17,6 @@
         "loss_penalty": -4.0
     },
     "simulation": {
-        "max_steps": 400
+        "max_steps": 1000
     }
 }
