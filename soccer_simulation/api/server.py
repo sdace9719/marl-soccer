@@ -51,9 +51,9 @@ def create_app():
                 obs, rewards, done, info = game.step(actions)
                 total_rewards += np.array(rewards)
 
-                # If a goal is scored on any tick, add it to the final info.
-                if "goal_scored_by" in info:
-                    aggregated_info.update(info)
+                # Always carry forward latest info (e.g., live score). If multiple ticks
+                # occur within the burst, the last update wins, reflecting most recent state.
+                aggregated_info.update(info)
 
                 # If the episode ends mid-burst, stop early.
                 if done:
