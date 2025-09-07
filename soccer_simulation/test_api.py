@@ -71,9 +71,10 @@ def main():
 
                 # Update scores from live score in infos
                 for i, info in enumerate(data["infos"]):
-                    if "score" in info:
-                        scores[i]["blue"] = info["score"].get("blue", scores[i]["blue"])
-                        scores[i]["red"] = info["score"].get("red", scores[i]["red"])
+                    # Safely check if a goal was scored before accessing the key
+                    if "goal_scored_by" in info:
+                        team = info["goal_scored_by"]
+                        scores[i][team] += 1
                 
                 # Check if the episode has finished
                 if any(data["dones"]):

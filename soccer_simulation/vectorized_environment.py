@@ -230,7 +230,6 @@ class RemoteMARLVecEnvSB3(VecEnv):
             return [False] * len(indices)
         return [False]
 
-
 def sb3_vectorized_env(num_envs=8, **kwargs) -> VecEnv:
     return RemoteMARLVecEnvSB3(num_envs=num_envs, **kwargs)
 
