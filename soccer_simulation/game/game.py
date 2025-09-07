@@ -71,6 +71,8 @@ class Game:
 
     def reset(self):
         self.steps = 0
+        # Reset score for the episode
+        self.score = {"blue": 0, "red": 0}
         for agent in self.agents:
             self.space.remove(agent.body, agent.shape)
         if self.ball:
@@ -136,8 +138,12 @@ class Game:
         for i, agent in enumerate(self.agents):
             agent_pos = np.array(agent.body.position)
             
-            # Self State
-            self_state = np.array(agent.body.velocity)
+            # Self State: position, velocity, angle
+            self_state = np.concatenate([
+                agent_pos,
+                np.array(agent.body.velocity),
+                np.array([agent.body.angle])
+            ])
 
             # Teammate Info
             teammate = self.agents[1] if i == 0 else self.agents[0] if i == 1 else self.agents[3] if i == 2 else self.agents[2]
@@ -162,46 +168,45 @@ class Game:
         return observations
 
     def _calculate_rewards(self, goal_info):
-        # Returns a list of rewards for blue agents only
-        all_rewards = {agent.id: 0.0 for agent in self.agents}
+        # Returns rewards for blue agents only (agent_0, agent_1)
         ball_pos = self.ball.body.position
+        blue_rewards = {"agent_0": 0.0, "agent_1": 0.0}
 
-        # 1. Ball Proximity & 2. Kicking/Possession Reward
+        # 1. Ball Proximity & 2. Kicking/Possession Reward (only accrue to blue agents)
         agent_distances_to_ball = {agent.id: agent.body.position.get_distance(ball_pos) for agent in self.agents}
         closest_agent_id = min(agent_distances_to_ball, key=agent_distances_to_ball.get)
-        
-        for agent in self.agents:
-            all_rewards[agent.id] += (self._prev_agent_dist_to_ball[agent.id] - agent_distances_to_ball[agent.id]) * self.config["rewards"]["ball_proximity_multiplier"]
-            if agent.id == closest_agent_id:
-                all_rewards[agent.id] += self.config["rewards"]["kick_possession_reward"]
 
-        # 3. Moving Ball Towards Goal
-        ball_dist_to_blue_goal = np.linalg.norm(ball_pos - self.goal_positions["blue_goal"])
+        for agent in self.agents[:2]:  # blue team: indices 0 and 1
+            agent_id = agent.id
+            blue_rewards[agent_id] += (
+                self._prev_agent_dist_to_ball[agent_id] - agent_distances_to_ball[agent_id]
+            ) * self.config["rewards"]["ball_proximity_multiplier"]
+
+        if closest_agent_id in ("agent_0", "agent_1"):
+            blue_rewards[closest_agent_id] += self.config["rewards"]["kick_possession_reward"]
+
+        # 3. Moving Ball Towards Opponent Goal (blue perspective)
         ball_dist_to_red_goal = np.linalg.norm(ball_pos - self.goal_positions["red_goal"])
-        
-        red_team_reward = (self._prev_ball_dist_to_blue_goal - ball_dist_to_blue_goal) * self.config["rewards"]["move_ball_to_goal_multiplier"]
-        blue_team_reward = (self._prev_ball_dist_to_red_goal - ball_dist_to_red_goal) * self.config["rewards"]["move_ball_to_goal_multiplier"]
-        
-        for agent in self.agents:
-            if agent.color == BLUE_TEAM_COLOR: all_rewards[agent.id] += blue_team_reward
-            else: all_rewards[agent.id] += red_team_reward
+        blue_team_reward = (
+            self._prev_ball_dist_to_red_goal - ball_dist_to_red_goal
+        ) * self.config["rewards"]["move_ball_to_goal_multiplier"]
+        blue_rewards["agent_0"] += blue_team_reward
+        blue_rewards["agent_1"] += blue_team_reward
 
-        # 4. Episode End Rewards (NOT SCALED)
+        # 4. Episode End Rewards (blue perspective only)
         if goal_info["scored"]:
-            for agent in self.agents:
-                if agent.color == goal_info["scoring_team_color"]:
-                    all_rewards[agent.id] += self.config["rewards"]["goal_scored_reward"]
-                    all_rewards[agent.id] += self.config["rewards"]["win_reward"]
-                else:
-                    all_rewards[agent.id] += self.config["rewards"]["goal_conceded_penalty"]
-                    all_rewards[agent.id] += self.config["rewards"]["loss_penalty"]
-        
-        # 5. Alive Penalty
-        for agent in self.agents:
-            all_rewards[agent.id] += self.config["rewards"]["alive_penalty"]
-            
-        # Return rewards for blue team only, in a consistent order
-        return [all_rewards["agent_0"], all_rewards["agent_1"]]
+            if goal_info["scoring_team_color"] == BLUE_TEAM_COLOR:
+                blue_rewards["agent_0"] += self.config["rewards"]["goal_scored_reward"]
+                blue_rewards["agent_1"] += self.config["rewards"]["goal_scored_reward"]
+            else:
+                blue_rewards["agent_0"] += self.config["rewards"]["goal_conceded_penalty"]
+                blue_rewards["agent_1"] += self.config["rewards"]["goal_conceded_penalty"]
+
+        # 5. Alive Penalty (blue only)
+        blue_rewards["agent_0"] += self.config["rewards"]["alive_penalty"]
+        blue_rewards["agent_1"] += self.config["rewards"]["alive_penalty"]
+
+        return [blue_rewards["agent_0"], blue_rewards["agent_1"]]
 
 
     def step(self, actions=None):
@@ -233,19 +238,19 @@ class Game:
         goal_y_bottom = SCREEN_HEIGHT/2 - GOAL_HEIGHT/2
 
         goal_info = {"scored": False}
-        scoring_team = None
         if ball_pos.x < FIELD_MARGIN and goal_y_bottom < ball_pos.y < goal_y_top:
             print("Goal for Red Team!")
             goal_info = {"scored": True, "scoring_team_color": RED_TEAM_COLOR}
-            scoring_team = "red"
+            self.score["red"] += 1
         elif ball_pos.x > SCREEN_WIDTH - FIELD_MARGIN and goal_y_bottom < ball_pos.y < goal_y_top:
             print("Goal for Blue Team!")
             goal_info = {"scored": True, "scoring_team_color": BLUE_TEAM_COLOR}
-            scoring_team = "blue"
+            self.score["blue"] += 1
         
         rewards = self._calculate_rewards(goal_info)
-        info = {}
-        if scoring_team:
+        info = {"score": {"blue": self.score.get("blue", 0), "red": self.score.get("red", 0)}}
+        if goal_info["scored"]:
+            scoring_team = "blue" if goal_info["scoring_team_color"] == BLUE_TEAM_COLOR else "red"
             info["goal_scored_by"] = scoring_team
 
         # Soft reset on goal, allowing the episode to continue
@@ -256,6 +261,12 @@ class Game:
         done = False
         if self.max_steps > 0 and self.steps >= self.max_steps:
             done = True
+            # Terminal bonus based on score difference (blue perspective)
+            score_diff = self.score.get("blue", 0) - self.score.get("red", 0)
+            multiplier = float(self.config["rewards"].get("score_difference_multiplier", 5.0))
+            terminal_bonus = multiplier * score_diff
+            # On the terminal step, only return the terminal bonus as the step reward
+            rewards = [terminal_bonus, terminal_bonus]
 
         observations = self._get_observations()
         
@@ -279,4 +290,3 @@ class Game:
             agent.draw(self.screen)
         self.ball.draw(self.screen)
         pygame.display.flip()
-        self.clock.tick(60)

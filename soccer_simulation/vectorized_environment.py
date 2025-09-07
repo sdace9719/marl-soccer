@@ -93,22 +93,31 @@ class RemoteMARLVecEnvSB3(VecEnv):
         self.possible_agents = template_env.possible_agents
         self.num_envs = num_envs
 
-        # Build flattened Box spaces for SB3 compatibility
-        obs_spaces = [template_env.observation_space(agent) for agent in self.possible_agents]
-        act_spaces = [template_env.action_space(agent) for agent in self.possible_agents]
+        # Identify trainable (blue team) vs opponent (red team) agents
+        # Assumption based on environment: agent_0, agent_1 are blue; agent_2, agent_3 are red
+        self.trainable_indices = [0, 1]
+        self.opponent_indices = [2, 3]
+        self.trainable_agents = [self.possible_agents[i] for i in self.trainable_indices]
+        self.opponent_agents = [self.possible_agents[i] for i in self.opponent_indices]
 
-        obs_low = np.concatenate([space.low.reshape(-1) for space in obs_spaces]).astype(np.float32)
-        obs_high = np.concatenate([space.high.reshape(-1) for space in obs_spaces]).astype(np.float32)
-        act_low = np.concatenate([space.low.reshape(-1) for space in act_spaces]).astype(np.float32)
-        act_high = np.concatenate([space.high.reshape(-1) for space in act_spaces]).astype(np.float32)
+        # Build flattened Box spaces ONLY for trainable agents
+        obs_spaces_train = [template_env.observation_space(agent) for agent in self.trainable_agents]
+        act_spaces_train = [template_env.action_space(agent) for agent in self.trainable_agents]
+        # Keep opponent spaces for random action sampling
+        self._opponent_act_spaces = [template_env.action_space(agent) for agent in self.opponent_agents]
+
+        obs_low = np.concatenate([space.low.reshape(-1) for space in obs_spaces_train]).astype(np.float32)
+        obs_high = np.concatenate([space.high.reshape(-1) for space in obs_spaces_train]).astype(np.float32)
+        act_low = np.concatenate([space.low.reshape(-1) for space in act_spaces_train]).astype(np.float32)
+        act_high = np.concatenate([space.high.reshape(-1) for space in act_spaces_train]).astype(np.float32)
 
         observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
         action_space = spaces.Box(low=act_low, high=act_high, dtype=np.float32)
 
         super().__init__(num_envs=self.num_envs, observation_space=observation_space, action_space=action_space)
 
-        # Cache action splits for fast slicing
-        self._act_dims = [int(np.prod(space.shape)) for space in act_spaces]
+        # Cache action splits for fast slicing (trainable only)
+        self._act_dims = [int(np.prod(space.shape)) for space in act_spaces_train]
         self._act_splits = np.cumsum([0] + self._act_dims)
 
         self._last_obs = None
@@ -120,24 +129,29 @@ class RemoteMARLVecEnvSB3(VecEnv):
         res.raise_for_status()
         data = res.json()
         observations_per_env = data["observations"]  # List[List[obs_per_agent]] length num_envs
-        # Flatten per-env observations into single vector per env
+        # Flatten per-env observations into single vector per env (trainable agents only)
         flat_obs = []
         for obs_list in observations_per_env:
-            flat_obs.append(np.concatenate([np.asarray(o, dtype=np.float32).reshape(-1) for o in obs_list], axis=0))
+            obs_list_train = [obs_list[i] for i in self.trainable_indices]
+            flat_obs.append(np.concatenate([np.asarray(o, dtype=np.float32).reshape(-1) for o in obs_list_train], axis=0))
         self._last_obs = np.stack(flat_obs, axis=0)
         return self._last_obs
 
     def step_async(self, actions):
-        # Accept actions as np.ndarray shape (num_envs, total_action_dim)
+        # Accept actions as np.ndarray shape (num_envs, total_action_dim for trainable agents)
         actions = np.asarray(actions)
         if actions.ndim == 1:
             actions = actions.reshape(self.num_envs, -1)
         actions_list = []
         for i in range(self.num_envs):
             env_actions = {}
-            for agent_idx, agent in enumerate(self.possible_agents):
+            # Learned actions for trainable agents
+            for agent_idx, agent in enumerate(self.trainable_agents):
                 a = actions[i, self._act_splits[agent_idx]:self._act_splits[agent_idx+1]]
                 env_actions[agent] = a.tolist()
+            # Random actions for opponent agents
+            for opp_idx, agent in enumerate(self.opponent_agents):
+                env_actions[agent] = self._opponent_act_spaces[opp_idx].sample().tolist()
             actions_list.append(env_actions)
 
         res = requests.post(f"{self.url}/step", json={"actions": actions_list})
@@ -154,7 +168,8 @@ class RemoteMARLVecEnvSB3(VecEnv):
         observations_per_env = data["observations"]
         flat_obs = []
         for obs_list in observations_per_env:
-            flat_obs.append(np.concatenate([np.asarray(o, dtype=np.float32).reshape(-1) for o in obs_list], axis=0))
+            obs_list_train = [obs_list[i] for i in self.trainable_indices]
+            flat_obs.append(np.concatenate([np.asarray(o, dtype=np.float32).reshape(-1) for o in obs_list_train], axis=0))
         observations = np.stack(flat_obs, axis=0)
 
         # Reduce multi-agent rewards to single scalar per env (sum)
@@ -162,21 +177,32 @@ class RemoteMARLVecEnvSB3(VecEnv):
         rewards = rewards_ma.sum(axis=1)
 
         dones = np.array(data["dones"], dtype=bool)
+        # Ensure infos is a list[dict]
         infos = data["infos"]
+        if not isinstance(infos, list):
+            infos = [{} for _ in range(self.num_envs)]
+        else:
+            infos = [info if isinstance(info, dict) else {} for info in infos]
 
-        # Auto-reset any finished envs and provide fresh observations for those
+        # Before auto-reset, save final observations for done envs
         if np.any(dones):
+            final_observations = observations.copy()
+            for env_idx, done in enumerate(dones):
+                if done:
+                    infos[env_idx]["final_observation"] = final_observations[env_idx]
+
+            # Auto-reset and supply fresh observations for done envs
             reset_res = requests.post(f"{self.url}/reset_all")
             reset_res.raise_for_status()
             reset_data = reset_res.json()
             reset_flat = []
             for obs_list in reset_data["observations"]:
-                reset_flat.append(np.concatenate([np.asarray(o, dtype=np.float32).reshape(-1) for o in obs_list], axis=0))
+                obs_list_train = [obs_list[i] for i in self.trainable_indices]
+                reset_flat.append(np.concatenate([np.asarray(o, dtype=np.float32).reshape(-1) for o in obs_list_train], axis=0))
             reset_obs = np.stack(reset_flat, axis=0)
-            # Replace observations where done
             observations[dones] = reset_obs[dones]
 
-        # SB3 expects 4-tuple: obs, rewards, dones, infos
+        # SB3 VecEnv expects 4-tuple with combined dones
         return observations, rewards, dones, infos
 
     def close(self):
@@ -196,6 +222,13 @@ class RemoteMARLVecEnvSB3(VecEnv):
     def set_attr(self, attr_name, value, inds=None):
         raise NotImplementedError
 
+    def env_is_wrapped(self, wrapper_class, indices=None):
+        # No local wrappers are applied; report False for all envs
+        if indices is None:
+            return [False] * self.num_envs
+        if isinstance(indices, (list, tuple, np.ndarray)):
+            return [False] * len(indices)
+        return [False]
 
 def sb3_vectorized_env(num_envs=8, **kwargs) -> VecEnv:
     return RemoteMARLVecEnvSB3(num_envs=num_envs, **kwargs)

@@ -30,7 +30,7 @@ class SoccerEnv(ParallelEnv):
         )
         
         self._observation_space = Box(
-            low=-np.inf, high=np.inf, shape=(14,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(17,), dtype=np.float32
         )
         # We don't interact with the server on init.
         # State will be set by the VecEnv's first reset.
