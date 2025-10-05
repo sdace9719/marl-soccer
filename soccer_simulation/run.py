@@ -9,7 +9,7 @@ import pygame
 import logging
 import json
 
-from soccer_simulation.api.server import run_server, init_environments, environments
+from soccer_simulation.api.server import run_server, init_environments, environments, set_eval_delay
 from soccer_simulation.game.constants import *
 
 def main():
@@ -18,6 +18,8 @@ def main():
     parser.add_argument("--headless", action="store_true", help="Run in headless mode without graphics")
     parser.add_argument("--num-envs", type=int, default=1, help="Number of parallel environments to run (requires headless mode)")
     parser.add_argument("--quiet", action="store_true", help="Disable server logs")
+    parser.add_argument("--eval", action="store_true", help="Enable evaluation mode (intended for slow visual playback)")
+    parser.add_argument("--eval-delay", type=float, default=0.5, help="Evaluation delay in seconds per API step (used when --eval)")
     args = parser.parse_args()
 
     # Load configuration from file
@@ -34,7 +36,14 @@ def main():
     }
     init_environments(args.num_envs, **game_kwargs)
 
+    # Configure default server-side eval delay if requested
+    if args.eval:
+        set_eval_delay(args.eval_delay)
+        if not args.quiet:
+            print(f"Eval mode enabled: server will sleep {args.eval_delay:.2f}s per step")
+
     # Start the server in a separate thread
+    # Note: eval delay is passed by clients with each /step call via 'eval_delay_s'
     server_thread = threading.Thread(target=run_server, kwargs={"quiet": args.quiet})
     server_thread.daemon = True
     server_thread.start()
