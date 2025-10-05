@@ -73,7 +73,15 @@ python -m test_rewards
  
 ## Result
 
-![soccer](soccer_simulation/soccer-twos.gif?raw=true)
+![soccer](soccer_simulation/soccer-twos.gif)
+
+Graph Plots
+
+![plot1](soccer_simulation/plot1.png)
+-------------------------------------
+![plot2](soccer_simulation/plot2.png)
+-------------------------------------
+![plot3](soccer_simulation/plot3.png)
 
 ## Future work
 It can be seen that the opponent is not challenging enough so it easy for our trained model to score. For SOTA performance, proper curriculum based training has to be implemented. To even achieve this, I had to put significant work and debug a lot(typical of any rl training).
