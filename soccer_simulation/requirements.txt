@@ -8,3 +8,6 @@ pettingzoo
 gymnasium
 supersuit
 stable-baselines3[extra]
+ipywidgets
+supersuit
+supersuit[basic]
