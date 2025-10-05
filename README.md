@@ -78,9 +78,9 @@ python -m test_rewards
 Graph Plots
 
 ![plot1](soccer_simulation/plot1.png)
--------------------------------------
+
 ![plot2](soccer_simulation/plot2.png)
--------------------------------------
+
 ![plot3](soccer_simulation/plot3.png)
 
 ## Future work
