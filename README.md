@@ -70,3 +70,12 @@ python -m test_rewards
   - `physics.max_velocity`, `physics.agent_friction`, `physics.ball_friction`
   - `rewards.goal_scored_reward`, `rewards.alive_penalty`
   - `simulation.max_steps`
+ 
+## Result
+
+![soccer](soccer_simulation/soccer-twos.gif?raw=true)
+
+## Future work
+It can be seen that the opponent is not challenging enough so it easy for our trained model to score. For SOTA performance, proper curriculum based training has to be implemented. To even achieve this, I had to put significant work and debug a lot(typical of any rl training).
+
+![Alt text](soccer_simulation/Honest_Work.jpg?raw=true)
