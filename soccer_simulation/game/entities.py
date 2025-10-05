@@ -1,7 +1,7 @@
 import pygame
 import pymunk
 
-from .constants import (AGENT_SIZE, BALL_CATEGORY, AGENT_CATEGORY,
+from game.constants import (AGENT_SIZE, BALL_CATEGORY, AGENT_CATEGORY,
                         WALL_CATEGORY, GOAL_WALL_CATEGORY, BALL_RADIUS,
                         SCREEN_HEIGHT)
 

@@ -1,46 +1,72 @@
-# Soccer Simulation for Multi-Agent Reinforcement Learning
+## Soccer Simulation for Multi-Agent Reinforcement Learning
 
-This project provides a 2v2 soccer simulation environment designed for multi-agent reinforcement learning (MARL). It features a client-server architecture that allows AI agents (or a test script) to control players by sending actions and receiving observations.
+This project provides a 2v2 soccer simulation for multi-agent reinforcement learning (MARL). It now ships a self-contained PettingZoo `ParallelEnv`. You can interact with it using:
+- A PettingZoo-compatible single-environment client (`soccerenv`) — self-contained
 
-## Core Architecture
+## Architecture
 
-The simulation is built on a decoupled, non-blocking client-server model to ensure smooth physics and a responsive API.
+- Embedded single-env: `soccer_simulation/soccer_env.py` implements a PettingZoo `ParallelEnv` that directly uses the internal `Game` for simulation.
+- Physics/game loop: Implemented in `soccer_simulation/game/`. Tuned via `config.json`.
 
-*   **Continuous Physics, Burst Simulation**: The simulation runs on a Python Flask server. For each parallel environment, a dedicated background thread manages the physics. This thread waits idly until it's triggered by an API call. When triggered, it runs the simulation for a fixed number of ticks (e.g., 8), applying the client's action continuously throughout the burst. This gives every action a clear, finite duration of effect.
-
-*   **Non-Blocking API**: The `/step` endpoint is non-blocking. When a client sends an action, the server immediately returns the observation from the *previous* simulation tick and then signals the appropriate background thread to start its next simulation burst. This allows the client to begin calculating its next move while the consequences of its last action are being simulated on the server.
+### Configuration
+- File: `config.json`
+- Tunables:
+  - Physics: `max_velocity`, `agent_mass`, `ball_mass`, `agent_friction`, `ball_friction`
+  - Rewards: shaping and terminal rewards
+  - Simulation: `max_steps` (episode length)
+- To change values, edit `config.json` and restart the server.
 
 ## File Structure
+- `soccer_env.py`:
+  - `SoccerEnv`: PettingZoo `ParallelEnv` (self-contained, single env)
+  - `soccer_raw_env()`: returns raw `SoccerEnv`
+  - `soccerenv()`: returns wrapped env (alias used in tests/imports)
+- `renderer.py`: Optional Pygame renderer used by `SoccerEnv.render()` when `render_mode="human"`
+- `soccer_simulation/game/`: Game logic and entities
+- `pz_api_lint.py`: PettingZoo Parallel API linter runner for compliance checks
 
--   `run.py`
-    -   The main entry point to launch the simulation server.
-    -   Handles command-line arguments like `--headless` for faster training and `--num-envs` for parallel simulations.
+## Getting Started
 
--   `config.json`
-    -   A central configuration file for tuning the simulation without changing the code.
-    -   Contains physics properties (mass, friction/damping), reward values, and simulation settings.
+### 1) Install
+```bash
+pip install -r requirements.txt
+```
 
--   `test_api.py`
-    -   An example client that connects to the server and sends random actions.
-    -   Useful for visualizing the simulation and testing server functionality.
+### 2) Single-Env (PettingZoo) Client — self-contained
+```python
+from soccer_simulation.soccer_env import soccerenv
 
--   `soccer_simulation/`
-    -   **`api/server.py`**: The core Flask server. It defines the API endpoints (`/step`, `/reset_all`) and manages the background physics loops for each environment.
-    -   **`game/game.py`**: Contains the main game logic. It manages the agents and the ball, calculates rewards, and handles the `step()` function that advances the physics engine.
-    -   **`game/entities.py`**: Defines the `Agent` and `Ball` classes. Crucially, this is where the custom physics logic, including the damping/friction for linear and angular velocity, is implemented.
+env = soccerenv(render_mode=None)  # or render_mode="human" to view
+obs, infos = env.reset()
 
-## How to Run
+done = False
+while not done:
+    actions = {agent: env.action_space(agent).sample() for agent in env.agents}
+    obs, rewards, terminations, truncations, infos = env.step(actions)
+    done = all(truncations.values())
+env.close()
+```
 
-1.  **Start the Server**:
-    ```bash
-    python run.py
-    ```
-    -   For training, run in headless mode for maximum speed: `python run.py --headless`
-    -   To run multiple environments in parallel (requires headless mode): `python run.py --headless --num-envs 8`
+## Testing
+- PettingZoo API linter:
+```bash
+python -m pz_api_lint
+```
+- Reward tests (self-contained env; no server needed):
+```bash
+python -m test_rewards
+```
 
-2.  **Run the Test Client**:
-    -   In a separate terminal, start the test client:
-    ```bash
-    python test_api.py
-    ```
-    -   If the server is running multiple environments, the client must match: `python test_api.py --num-envs 8`
+## Tips & Conventions
+- `SoccerEnv` is single-env only and will raise if initialized with other counts.
+- Vectorized rewards are returned as `(num_envs, 2)` for the two controlled agents.
+- Goal detection:
+  - Single env: `infos['agent_0'].get('goal_scored_by')`
+  - Vectorized: iterate `for env_idx, info in enumerate(infos): info.get('goal_scored_by')`
+
+## Changing Physics/Rewards
+- Edit `config.json` and restart the server.
+- Example keys:
+  - `physics.max_velocity`, `physics.agent_friction`, `physics.ball_friction`
+  - `rewards.goal_scored_reward`, `rewards.alive_penalty`
+  - `simulation.max_steps`
